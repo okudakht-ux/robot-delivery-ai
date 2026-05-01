@@ -1,152 +1,195 @@
+
 import streamlit as st
 import pandas as pd
+import requests
+import os
 
 st.set_page_config(page_title="Robot Delivery AI", layout="wide")
 
-st.title("Multi-Agent Robot Delivery Optimization")
-st.write("AI prototype for smart coordination of delivery robots in urban logistics.")
+API_KEY = os.getenv("IBM_API_KEY")
+PROJECT_ID = "7d38fd3d-1e9f-4d4e-8518-f78378da019c"
+URL = "https://us-south.ml.cloud.ibm.com"
+
+
+def get_ibm_token():
+    try:
+        response = requests.post(
+            "https://iam.cloud.ibm.com/identity/token",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data={
+                "grant_type": "urn:ibm:params:oauth:grant-type:apikey",
+                "apikey": API_KEY,
+            },
+        )
+        return response.json().get("access_token")
+    except Exception:
+        return None
+
+
+def watsonx_explanation(text):
+    if not API_KEY:
+        return "No IBM API key found."
+
+    token = get_ibm_token()
+    if not token:
+        return "Failed to get IBM token."
+
+    endpoint = f"{URL}/ml/v1/text/generation?version=2023-05-29"
+
+    payload = {
+        "model_id": "ibm/granite-3-8b-instruct",
+        "project_id": PROJECT_ID,
+        "input": f"Explain in 2-3 simple sentences for a business user. Keep it clear and short: {text}",
+        "parameters": {
+            "decoding_method": "greedy",
+            "max_new_tokens": 140,
+        },
+    }
+
+    response = requests.post(
+        endpoint,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+    )
+
+    if response.status_code == 200:
+        return response.json()["results"][0]["generated_text"]
+    return f"IBM error: {response.text}"
+
+
+st.title("🚀 Multi-Agent Robot Delivery Optimization")
+st.write("AI system for coordinating delivery robots using intelligent decision-making.")
 
 st.markdown("---")
 
-# -----------------------
-# Robots Data
-# -----------------------
+st.header("AI Agent System")
+st.markdown("""
+This prototype simulates a multi-agent AI system:
+
+- **Knowledge Synthesizer** → combines battery, distance, and traffic data into one operational score  
+- **Decision Gatekeeper** → selects the robot with the lowest operational risk  
+- **Dynamic Re-planner** → adapts when delivery priorities change  
+- **IBM watsonx Reasoning Layer** → explains decisions in clear business language  
+""")
+
+st.markdown("---")
+
 st.header("1. Available Robots")
 
 robots = pd.DataFrame({
     "Robot": ["R1", "R2", "R3"],
     "Battery (%)": [25, 90, 60],
-    "Distance to Order (miles)": [0.4, 1.2, 0.8],
-    "Traffic Risk": ["Low", "Medium", "High"],
-    "Status": ["Available", "Available", "Available"]
+    "Distance": [0.4, 1.2, 0.8],
+    "Traffic": ["Low", "Medium", "High"]
 })
 
 st.dataframe(robots, use_container_width=True)
 
-# -----------------------
-# Orders Data
-# -----------------------
 st.header("2. Current Order")
+st.write("Destination: Mission District | Type: Food Delivery")
 
-orders = pd.DataFrame({
-    "Order": ["O1"],
-    "Priority": ["Normal"],
-    "Destination": ["Mission District"],
-    "Type": ["Food Delivery"]
-})
 
-st.dataframe(orders, use_container_width=True)
-
-# -----------------------
-# Optimization Logic
-# -----------------------
 def traffic_score(level):
-    mapping = {"Low": 1, "Medium": 2, "High": 3}
-    return mapping[level]
+    return {"Low": 1, "Medium": 2, "High": 3}[level]
+
 
 def calculate_score(row):
-    distance = row["Distance to Order (miles)"]
-    battery_penalty = (100 - row["Battery (%)"]) / 100
-    traffic = traffic_score(row["Traffic Risk"])
+    return round(
+        0.5 * row["Distance"] +
+        0.3 * (100 - row["Battery (%)"]) / 100 +
+        0.2 * traffic_score(row["Traffic"]),
+        3
+    )
 
-    score = (0.5 * distance) + (0.3 * battery_penalty) + (0.2 * traffic)
-    return round(score, 3)
 
-robots["Optimization Score"] = robots.apply(calculate_score, axis=1)
+robots["Score"] = robots.apply(calculate_score, axis=1)
 
-# -----------------------
-# Optimize Button
-# -----------------------
 st.header("3. Optimize Assignment")
 
 if st.button("Optimize Delivery"):
-    best_robot = robots.sort_values("Optimization Score").iloc[0]
+    best_robot = robots.sort_values("Score").iloc[0]
 
-    st.success(f"Selected Robot: {best_robot['Robot']}")
+    st.success(f"✅ Selected Robot: {best_robot['Robot']}")
 
-    st.subheader("AI Decision Explanation")
+    st.subheader("🧠 Knowledge Synthesizer")
     st.write(
-        f"Robot {best_robot['Robot']} was selected after evaluating multiple constraints: "
-        f"distance, battery level, and traffic risk. "
-        f"The system does not simply choose the closest robot. It prioritizes the robot "
-        f"with the best balance of efficiency and reliability."
+        "The system combines battery level, delivery distance, and traffic risk into one operational score."
     )
 
-    st.subheader("Robot Comparison")
-    st.dataframe(
-        robots.sort_values("Optimization Score"),
-        use_container_width=True
+    st.subheader("🛡️ Decision Gatekeeper")
+    st.write(
+        f"The gatekeeper selected Robot {best_robot['Robot']} because it has the lowest risk score: {best_robot['Score']}."
     )
 
-    st.info(
-        "AI insight: The selected robot has the lowest operational risk for the current order. "
-        "This demonstrates task allocation based on multi-agent coordination rather than manual selection."
-    )
+    st.markdown("### 🤖 AI Decision Reasoning — Generated by IBM watsonx")
+
+    explanation = f"""
+Robot {best_robot['Robot']} was selected.
+Battery: {best_robot['Battery (%)']}%.
+Distance: {best_robot['Distance']} miles.
+Traffic risk: {best_robot['Traffic']}.
+Optimization score: {best_robot['Score']}.
+Explain why this is the best operational decision.
+"""
+
+    st.write(watsonx_explanation(explanation))
+    st.caption("This explanation is generated dynamically using IBM watsonx.ai and IBM Granite.")
+
+    st.subheader("📊 Robot Comparison")
+    st.dataframe(robots.sort_values("Score"), use_container_width=True)
 
 st.markdown("---")
 
-# -----------------------
-# Conflict Scenario
-# -----------------------
 st.header("4. Dynamic Conflict Scenario")
 
-st.write(
-    "A new urgent hospital delivery appears while the system is already handling the normal order."
-)
-
-urgent_order = pd.DataFrame({
-    "Order": ["O2"],
-    "Priority": ["Urgent"],
-    "Destination": ["Hospital"],
-    "Type": ["Medical Delivery"]
-})
-
-st.dataframe(urgent_order, use_container_width=True)
-
 if st.button("Run Conflict Resolution"):
+    st.success("System re-optimized for urgent delivery")
+
     conflict_result = pd.DataFrame({
         "Order": ["O1", "O2"],
         "Priority": ["Normal", "Urgent"],
         "Assigned Robot": ["R1", "R2"],
         "Reason": [
-            "R1 is close enough for the normal-priority delivery.",
-            "R2 has high battery and is more reliable for the urgent hospital delivery."
+            "R1 remains suitable for the shorter normal delivery.",
+            "R2 is assigned to the urgent hospital delivery because it has higher battery reliability."
         ]
     })
 
-    st.success("System re-optimized assignments due to priority change.")
+    st.subheader("🔄 Dynamic Re-planner")
+    st.write(
+        "The system detects a priority change and updates assignments instead of keeping the original plan."
+    )
 
-    st.subheader("Re-Optimized Assignment")
     st.dataframe(conflict_result, use_container_width=True)
 
-    st.subheader("AI Conflict Explanation")
-    st.write(
-        "The system detected a conflict: a normal delivery and an urgent hospital delivery "
-        "require robot assignment at the same time. Instead of keeping the original assignment, "
-        "the system re-optimized the plan. R2 was assigned to the urgent hospital order because "
-        "it has the highest battery level and lower operational risk. R1 was assigned to the normal "
-        "delivery because the route is shorter and the order is less time-sensitive."
-    )
+    st.markdown("### 🤖 AI Conflict Reasoning — Generated by IBM watsonx")
 
-    st.warning(
-        "This shows dynamic decision-making: the system adapts when priorities change."
-    )
+    conflict_text = """
+A new urgent hospital delivery appears while a normal food delivery is already active.
+The system reassigns robots based on priority, battery reliability, distance, and operational risk.
+Explain why dynamic re-planning is useful for logistics.
+"""
+
+    st.write(watsonx_explanation(conflict_text))
+    st.caption("This explanation is generated dynamically using IBM watsonx.ai.")
 
 st.markdown("---")
 
-# -----------------------
-# Technology Explanation
-# -----------------------
-st.header("5. Technology Concept")
-
+st.header("5. Deployment Concept")
 st.write(
-    "This prototype represents a simplified multi-agent AI system. "
-    "Robot agents provide status data, the task allocation agent compares possible assignments, "
-    "the energy agent evaluates battery risk, and the traffic agent evaluates route conditions. "
-    "The orchestrator coordinates these agents and selects the best delivery plan."
+    "This system can be deployed as a real-time AI service where agents continuously analyze new orders, robot status, and route risk."
 )
 
-st.write(
-    "In a full IBM watsonx implementation, IBM Granite or watsonx.ai can generate richer explanations, "
-    "while watsonx Orchestrate can coordinate multiple agents and tools."
-)
+st.header("6. Technology")
+st.write("""
+- Python + Streamlit  
+- IBM watsonx.ai  
+- IBM Granite foundation model  
+- Knowledge Synthesizer  
+- Decision Gatekeeper  
+- Dynamic Re-planner  
+- Multi-agent decision architecture  
+""")
